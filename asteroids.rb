@@ -5,6 +5,7 @@
 
 require 'opengl'
 require 'glut'
+require 'time'
 include Math
 
 # compute the sign of a number
@@ -14,7 +15,60 @@ def Sgn(value)
   elsif value < 0
     -1
   else
-     0
+    0
+  end
+end
+
+# Graphical Object Class
+# provides generic functionality for objects
+class GObject
+
+  # So that we can read these publicly
+  attr_reader :xCenter, :yCenter, :radius
+
+  # initialize the object
+  # sets the item's parent game, initial position, change in positions and radius
+  def initialize(game, init_x, init_y, delta_x, delta_y, radius, verticies, type)
+	@game = game
+	@xCenter = init_x
+    @yCenter = init_y
+    @xDelta = delta_x
+    @yDelta = delta_y
+	@radius = radius
+	@verticies = verticies
+	@type = type
+  end
+  
+  # generic draw function which draws a given set of verticies and a type with optional rotation
+  def draw(rotate=nil)
+	GL.PushMatrix()
+    GL.Translate(@xCenter, @yCenter, 0)
+	GL.Rotate(*rotate) if rotate
+
+    GL.Color3b(255, 255, 255) #WHITE
+
+    GL.Begin(@type)
+		@verticies.each { |x, y| GL.Vertex2f(x,y) }
+    GL.End()
+    GL.PopMatrix()
+  end
+  
+  # move the object to its next location
+  def move
+    @xCenter += @xDelta
+    @yCenter += @yDelta
+  end
+  
+  # wrap the object around the screen
+  # typically used in a custom draw function at the end
+  def wrap
+    # the world wraps around
+    # adjust position of object to other side of screen
+    # if you exit screen left, you enter screen right (etc)
+    @xCenter -= 2*@game.xMax if @xCenter > @game.xMax
+    @yCenter -= 2*@game.yMax if @yCenter > @game.yMax
+    @xCenter += 2*@game.xMax if @xCenter < -@game.xMax
+    @yCenter += 2*@game.yMax if @yCenter < -@game.yMax
   end
 end
 
@@ -23,19 +77,17 @@ end
 # a ship can accelerate (naturally decellerates)
 # a ship can move (does so automatically)
 # radius value is for detecting collisions
-class Ship
-  def initialize(game)
-    @radius = 0.5
-    @xCenter = 0
-    @yCenter = 0
-    @direction = 0
-    @xDelta = 0
-    @yDelta = 0
-    @speed = 0
-    @game = game
-  end #initialize
+class Ship < GObject
 
-  attr_reader :xCenter, :yCenter, :direction
+  attr_reader :direction
+  attr_accessor :destroyed # allows game to set the ship as destroyed
+
+  def initialize(game)
+    @direction = 0
+    @speed = 0
+	@destroyed = nil
+    super(game, 0, 0, 0, 0, 0.5, game.ship_verticies, GL::LINE_LOOP)
+  end #initialize
 
   # change ship's speed (called by game in key method)
   def accellerate
@@ -51,20 +103,13 @@ class Ship
 
   # adjust center of object to update position
   def move
-    @xCenter += @xDelta
-    @yCenter += @yDelta
+	super
 
     # a ship slows over time, so less delta
     @xDelta -= 0.001*Sgn(@xDelta)
     @yDelta -= 0.001*Sgn(@yDelta)
 
-    # the world wraps around
-    # adjust position of object to other side of screen
-    # if you exit screen left, you enter screen right (etc)
-    @xCenter -= 2*@game.xMax if @xCenter > @game.xMax
-    @yCenter -= 2*@game.yMax if @yCenter > @game.yMax
-    @xCenter += 2*@game.xMax if @xCenter < -@game.xMax
-    @yCenter += 2*@game.yMax if @yCenter < -@game.yMax
+    wrap
   end
 
   # change ship's orientation (called by game in key method)
@@ -74,212 +119,102 @@ class Ship
 
   # adjust center of object to update position
   def draw
-    GL.PushMatrix()
-    GL.Translate(@xCenter, @yCenter, 0)
-    GL.Rotate(@direction.to_f, 0.0, 0.0, 1.0)
+    if not @destroyed
+		super([@direction.to_f, 0.0, 0.0, 1.0])
+	else	
+		# Player is dead
+		GL.RasterPos2d(-3, 0)
+		"You have died".each_byte { |c| GLUT.BitmapCharacter(GLUT::BITMAP_HELVETICA_12, c) }	
+		
+		# Reset ship after 5 seconds
+		@destroyed = nil if  Time.now - @destroyed > 5
+	end
 
-    GL.Color3b(255, 255, 255) #WHITE
-
-    GL.Begin(GL::LINE_LOOP)
-        GL.Vertex2f( 0.0,  1.2)
-        GL.Vertex2f( 0.8, -1.2)
-        GL.Vertex2f( 0.0, -0.4)
-        GL.Vertex2f(-0.8, -1.2)
-    GL.End()
-    GL.PopMatrix()
   end #draw
+end
 
+# super class for the asteroid obstacles
+# an obsticle and a target in the game
+# an asteroid can move (does so automatically)
+# radius value is for detecting collisions
+class Asteroid < GObject
+
+  attr_reader :xDelta, :yDelta
+
+  def initialize(radius, init_x, init_y, delta_x, delta_y, game, verticies)
+    super(game, init_x, init_y, delta_x, delta_y, radius, verticies, GL::LINE_LOOP)
+  end #initialize
+
+  # adjust center of object to update position
+  def move
+    super
+	wrap
+  end
 end
 
 # an obsticle and a target in the game
 # an asteroid can move (does so automatically)
 # radius value is for detecting collisions
-class SmallAsteroid
+class SmallAsteroid < Asteroid
   def initialize(init_x, init_y, delta_x, delta_y, game)
-    @radius = 0.5
-    @xCenter = init_x
-    @yCenter = init_y
-    @xDelta = delta_x
-    @yDelta = delta_y
-    @game = game
+	verticies = [[0.5, 0.5],
+	             [0.5, -0.5],
+				 [-0.5, -0.5],
+				 [-0.5, 0.5]]  
+	super(0.5, init_x, init_y, delta_x, delta_y, game, verticies)
   end #initialize
-
-  # adjust center of object to update position
-  def move
-    @xCenter += @xDelta
-    @yCenter += @yDelta
-
-    # the world wraps around
-    # adjust position of object to other side of screen
-    # if you exit screen left, you enter screen right (etc)
-    @xCenter -= 2*@game.xMax if @xCenter > @game.xMax
-    @yCenter -= 2*@game.yMax if @yCenter > @game.yMax
-    @xCenter += 2*@game.xMax if @xCenter < -@game.xMax
-    @yCenter += 2*@game.yMax if @yCenter < -@game.yMax
-  end
-
-  # make pixels on the screen
-  # no need to change this
-  def draw
-    GL.PushMatrix()
-    GL.Translate(@xCenter, @yCenter, 0)
-
-    GL.Color3b(255, 255, 255) #WHITE
-
-    GL.Begin(GL::LINE_LOOP)
-        GL.Vertex2f( 0.5,  0.5)
-        GL.Vertex2f( 0.5, -0.5)
-        GL.Vertex2f(-0.5, -0.5)
-        GL.Vertex2f(-0.5,  0.5)
-    GL.End()
-    GL.PopMatrix()
-  end #draw
-
 end #SmallAsteroid
 
 # an obsticle and a target in the game
 # an asteroid can move (does so automatically)
 # radius value is for detecting collisions
-class MediumAsteroid
+class MediumAsteroid < Asteroid
   def initialize(init_x, init_y, delta_x, delta_y, game)
-    @radius = 1
-    @xCenter = init_x
-    @yCenter = init_y
-    @xDelta = delta_x
-    @yDelta = delta_y
-    @game = game
+	verticies = [[1.0, 1.0],
+				 [0.5, 0.5],
+				 [1.0, -1.0],
+				 [0.5, -0.5],
+				 [-1.0, -1.0],
+				 [-0.5, -0.5],
+				 [-0.5, 0.5]]
+	super(1, init_x, init_y, delta_x, delta_y, game, verticies)
   end #initialize
-
-  # adjust center of object to update position
-  def move
-    @xCenter += @xDelta
-    @yCenter += @yDelta
-
-    # the world wraps around
-    # adjust position of object to other side of screen
-    # if you exit screen left, you enter screen right (etc)
-    @xCenter -= 2*@game.xMax if @xCenter > @game.xMax
-    @yCenter -= 2*@game.yMax if @yCenter > @game.yMax
-    @xCenter += 2*@game.xMax if @xCenter < -@game.xMax
-    @yCenter += 2*@game.yMax if @yCenter < -@game.yMax
-  end
-
-  # make pixels on the screen
-  # no need to change this
-  def draw
-    GL.PushMatrix()
-    GL.Translate(@xCenter, @yCenter, 0)
-
-    GL.Color3b(255, 255, 255) #WHITE
-
-    GL.Begin(GL::LINE_LOOP)
-        GL.Vertex2f( 1.0,  1.0)
-        GL.Vertex2f( 0.5,  0.5)
-        GL.Vertex2f( 1.0,  -1.0)
-        GL.Vertex2f( 0.5, -0.5)
-        GL.Vertex2f( -1.0,  -1.0)
-        GL.Vertex2f(-0.5, -0.5)
-        GL.Vertex2f(-0.5,  0.5)
-    GL.End()
-    GL.PopMatrix()
-  end #draw
-
 end #MediumAsteroid
 
 
 # an obsticle and a target in the game
 # an asteroid can move (does so automatically)
 # radius value is for detecting collisions
-class LargeAsteroid
+class LargeAsteroid < Asteroid
   def initialize(init_x, init_y, delta_x, delta_y, game)
-    @radius = 1.5
-    @xCenter = init_x
-    @yCenter = init_y
-    @xDelta = delta_x
-    @yDelta = delta_y
-    @game = game
+    verticies = [[1.0, 1.0],
+				 [1.5, 1.5],
+				 [1.0, -1.0],
+		         [1.5, -1.5],
+		         [-1.0, -1.0],
+				 [-1.0, -1.5],
+				 [-1.5, 1.5]]
+	super(1.5, init_x, init_y, delta_x, delta_y, game, verticies)
   end #initialize
-
-  # adjust center of object to update position
-  def move
-
-    @xCenter += @xDelta
-    @yCenter += @yDelta
-
-    # the world wraps around
-    # adjust position of object to other side of screen
-    # if you exit screen left, you enter screen right (etc)
-
-    @xCenter -= 2*@game.xMax if @xCenter > @game.xMax
-    @yCenter -= 2*@game.yMax if @yCenter > @game.yMax
-    @xCenter += 2*@game.xMax if @xCenter < -@game.xMax
-    @yCenter += 2*@game.yMax if @yCenter < -@game.yMax
-
-  end
-
-  # make pixels on the screen
-  # no need to change this
-  def draw
-    GL.PushMatrix()
-    GL.Translate(@xCenter, @yCenter, 0)
-
-    GL.Color3b(255, 255, 255) #WHITE
-
-    GL.Begin(GL::LINE_LOOP)
-        GL.Vertex2f( 1.0,  1.0)
-        GL.Vertex2f( 1.5,  1.5)
-        GL.Vertex2f( 1.0,  -1.0)
-        GL.Vertex2f( 1.5, -1.5)
-        GL.Vertex2f( -1.0,  -1.0)
-        GL.Vertex2f(-1.0, -1.5)
-        GL.Vertex2f(-1.5,  1.5)
-    GL.End()
-    GL.PopMatrix()
-  end #draw
 end
 
 # PTorpedo - photon torpedo
 # always starts at the ship's center
 # moves in the direction of the ship (at the time when PTorpedo object created)
 # must know it's ship when created
-class PTorpedo
+class PTorpedo < GObject
   def initialize(ship, game)
-    @radius = 0.001
-    @xCenter = ship.xCenter
-    @yCenter = ship.yCenter
-    @xDelta = 0.5 * -Math.sin(ship.direction/180*3.1415)
-    @yDelta = 0.5 * Math.cos(ship.direction/180*3.1415)
-    @game = game
+	verticies = [[0.1, 0.1],
+	             [0.1, -0.1],
+				 [-0.1, -0.1],
+				 [-0.1, 0.1]]
+   	super(game, 
+	      ship.xCenter, 
+		  ship.yCenter, 
+		  0.5 * -Math.sin(ship.direction/180*3.1415),
+		  0.5 * Math.cos(ship.direction/180*3.1415),
+		  0.001, verticies, GL::QUADS)
   end #initialize
-
-
-  # adjust center of object to update position
-  def move
-
-    @xCenter += @xDelta
-    @yCenter += @yDelta
-
-    # TODO: destroy this object if @xCenter > @game.xMax
-    # TODO: destroy this object if @yCenter > @game.yMax
-  end
-
-  # make pixels on the screen
-  # no need to change this
-  def draw
-    GL.PushMatrix()
-    GL.Translate(@xCenter, @yCenter, 0)
-
-    GL.Color3b(255, 255, 255) #WHITE
-    GL.Begin(GL::QUADS)
-        GL.Vertex2f( 0.1,  0.1)
-        GL.Vertex2f( 0.1, -0.1)
-        GL.Vertex2f(-0.1, -0.1)
-        GL.Vertex2f(-0.1,  0.1)
-    GL.End()
-
-    GL.PopMatrix()
-  end #draw
-
 end #PTorpedo
 
 # Game has many purposes
@@ -291,18 +226,35 @@ end #PTorpedo
 
 class Game
 
-  attr_reader :xMax, :yMax
+  attr_reader :xMax, :yMax, :ship_verticies
 
   def draw
     GL.Clear(GL::COLOR_BUFFER_BIT )
 
     @ship.draw
-    @asteroids.each do |go|
-      go.draw
-    end
+    @asteroids.each { |go| go.draw }
+	@torpedos.each { |torpedo| torpedo.draw }
 
-    @torpedo.draw if defined? @torpedo
-
+	# display the score
+	GL.RasterPos2d(-19, -19)
+	string = "Score: %4i" % @score.to_s
+	string.each_byte { |c| GLUT.BitmapCharacter(GLUT::BITMAP_HELVETICA_12, c) }	
+	
+	# display the lives
+	@lives.each { |life| life.draw }
+	
+	# display game over text if necessary
+	if @lives.length == 0
+		GL.RasterPos2d(-2.75, -2)
+		"GAME OVER".each_byte { |c| GLUT.BitmapCharacter(GLUT::BITMAP_HELVETICA_12, c) }	
+	end	
+	
+	# display you win if the player destroyed all the asteroids
+	if @asteroids.length == 0
+		GL.RasterPos2d(-2, 0)
+		"YOU WIN".each_byte { |c| GLUT.BitmapCharacter(GLUT::BITMAP_HELVETICA_12, c) }
+	end
+	
     GLUT.SwapBuffers()
 
     @frames += 1
@@ -316,7 +268,12 @@ class Game
 
       @t0, @frames = t, 0
     end
-
+	
+	# quit the game if they lost all their lives or destroyed all the asteroids
+	if @lives.length == 0 or @asteroids.length == 0
+		sleep(3)
+		exit
+	end
   end
 
   # idle()
@@ -339,33 +296,78 @@ class Game
   # move()
   # update the postion of all moveable objects in the game
   def move
-
     @ship.move
+    @asteroids.each { |go| go.move }
 
-    @asteroids.each do |go|
-      go.move
-    end
+	@torpedos.each do |torpedo|
+		torpedo.move
 
-    @torpedo.move if defined? @torpedo
-
+		# if torpedo is off the screen, just get rid of it
+		@torpedos.delete(torpedo) if torpedo.xCenter > @xMax or torpedo.yCenter > @yMax
+	end
+	
+	# check for collisions between objects and act accordingly
+	collisions
   end
 
+  # check for collisions between objects and act accordingly
+  def collisions
+	# check to see if any PTorpedos have hit an asteroid
+	@asteroids.each do |asteroid|
+		@torpedos.each do |torpedo|
+			# Check the distance between each
+			distance = Math.sqrt((asteroid.xCenter - torpedo.xCenter)**2 + (asteroid.yCenter - torpedo.yCenter)**2)
+			
+			# Delete the torpedo and asteroid if they collide
+			# We don't need to test the torpedo radius because its so small (poor torpedo)
+			if distance < asteroid.radius
+				@torpedos.delete(torpedo)
+				@asteroids.delete(asteroid)
+				
+				# split larger asteroids into smaller ones upon collision with a torpedo
+				if asteroid.class == LargeAsteroid
+					@asteroids.push(MediumAsteroid.new(asteroid.xCenter, asteroid.yCenter, asteroid.xDelta, -asteroid.yDelta, self))
+					@asteroids.push(MediumAsteroid.new(asteroid.xCenter, asteroid.yCenter, -asteroid.xDelta, asteroid.yDelta, self))
+				elsif asteroid.class == MediumAsteroid
+					@asteroids.push(SmallAsteroid.new(asteroid.xCenter, asteroid.yCenter, asteroid.xDelta, -asteroid.yDelta, self))
+					@asteroids.push(SmallAsteroid.new(asteroid.xCenter, asteroid.yCenter, -asteroid.xDelta, asteroid.yDelta, self))
+				end
+				
+				@score += 100
+				break
+			end
+		end
+		
+		# player loses a life if they collided with an asteroid
+		distance = Math.sqrt((asteroid.xCenter - @ship.xCenter)**2 + (asteroid.yCenter - @ship.yCenter)**2)
+		if distance < asteroid.radius or distance < @ship.radius
+			@asteroids.delete(asteroid)
+			@ship = Ship.new(self)
+			@ship.destroyed = Time.now
+			@lives.slice!(-1) # Remove a life
+		end
+	end
+  end
+  
   # respond to keypresses
   # ship movement, torpedo fire
   # ESC to terminate
   def key(k, x, y)
-    case k
-      when ?j
-        @ship.rotate(5.0)
-      when ?k
-        @ship.rotate(-5.0)
-      when ?h
-        @ship.accellerate
-      when ?l
-        @torpedo = PTorpedo.new(@ship, self)
-      when 27 # Escape
-        exit
-    end
+    # as long as the ship is not destroyed, we will accept keypresses
+    if not @ship.destroyed
+		case k
+		  when ?j
+			@ship.rotate(5.0)
+		  when ?k
+			@ship.rotate(-5.0)
+		  when ?h
+			@ship.accellerate
+		  when ?l
+			@torpedos.push(PTorpedo.new(@ship, self))
+		  when 27 # Escape
+			exit
+		end
+	end
     GLUT.PostRedisplay()
   end
 
@@ -406,14 +408,24 @@ class Game
     GLUT.IdleFunc((vis == GLUT::VISIBLE ? method(:idle).to_proc : nil))
   end
 
-
   # initialize the game object
   # there are things you would change in this method (maybe)
-
   def initialize
     @xMax = 22
     @yMax = 22
 
+	# store the ship matrix here because we use it for both the ship class as well showing the player lives
+	@ship_verticies = [[0.0, 1.2],
+					  [0.8, -1.2],
+					  [0.0, -0.4],
+					  [-0.8, -1.2]]
+	
+	@score = 0
+	@lives = Array.new
+	@lives[0] = GObject.new(self, 18, -18, 0, 0, 0, @ship_verticies, GL::LINE_LOOP)
+	@lives[1] = GObject.new(self, 16, -18, 0, 0, 0, @ship_verticies, GL::LINE_LOOP)
+	@lives[2] = GObject.new(self, 14, -18, 0, 0, 0, @ship_verticies, GL::LINE_LOOP)
+	
     @asteroids = Array.new
 
     @ship = Ship.new(self)
@@ -422,6 +434,8 @@ class Game
     @asteroids[2] = MediumAsteroid.new(3, -2, 0.05, -0.05, self)
     @asteroids[3] = LargeAsteroid.new(-3, -2, 0.0, -0.05, self)
 
+	@torpedos = Array.new
+	
     # the beginning of the graphics stuff
     # leave this alone
 
@@ -442,12 +456,10 @@ class Game
   def start
     GLUT.MainLoop()
   end
-
 end
 
 
 # here is where the game starts
 # one game object
-
 game = Game.new
 game.start
