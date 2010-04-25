@@ -231,9 +231,8 @@ class Game
   def draw
     GL.Clear(GL::COLOR_BUFFER_BIT )
 
-    @ship.draw
-    @asteroids.each { |go| go.draw }
-	@torpedos.each { |torpedo| torpedo.draw }
+	# Requirement C.3 - draw all objects from a list
+	@objects.each { |go| go.draw }
 
 	# display the score
 	GL.RasterPos2d(-19, -19)
@@ -250,7 +249,10 @@ class Game
 	end	
 	
 	# display you win if the player destroyed all the asteroids
-	if @asteroids.length == 0
+	asteroids = 0
+	@objects.each { |go| asteroids += 1 if go.kind_of? Asteroid }
+	
+	if asteroids == 0
 		GL.RasterPos2d(-2, 0)
 		"YOU WIN".each_byte { |c| GLUT.BitmapCharacter(GLUT::BITMAP_HELVETICA_12, c) }
 	end
@@ -270,7 +272,7 @@ class Game
     end
 	
 	# quit the game if they lost all their lives or destroyed all the asteroids
-	if @lives.length == 0 or @asteroids.length == 0
+	if @lives.length == 0 or asteroids == 0
 		sleep(3)
 		exit
 	end
@@ -296,55 +298,63 @@ class Game
   # move()
   # update the postion of all moveable objects in the game
   def move
-    @ship.move
-    @asteroids.each { |go| go.move }
-
-	@torpedos.each do |torpedo|
-		torpedo.move
-
-		# if torpedo is off the screen, just get rid of it
-		@torpedos.delete(torpedo) if torpedo.xCenter > @xMax or torpedo.yCenter > @yMax
+	@objects.each do |go|
+		go.move
+		
+		@objects.delete(go) if go.kind_of? PTorpedo and (go.xCenter > @xMax or go.yCenter > @yMax)
 	end
 	
 	# check for collisions between objects and act accordingly
-	collisions
+	collisions if not @ship.destroyed
   end
 
   # check for collisions between objects and act accordingly
   def collisions
 	# check to see if any PTorpedos have hit an asteroid
-	@asteroids.each do |asteroid|
-		@torpedos.each do |torpedo|
+	asteroids = Array.new
+	@objects.each { |go| asteroids.push(go) if go.kind_of? Asteroid }
+	
+	torpedos = Array.new
+	@objects.each { |go| torpedos.push(go) if go.kind_of? PTorpedo }
+	
+	asteroids.each do |asteroid|
+		torpedos.each do |torpedo|
 			# Check the distance between each
 			distance = Math.sqrt((asteroid.xCenter - torpedo.xCenter)**2 + (asteroid.yCenter - torpedo.yCenter)**2)
 			
 			# Delete the torpedo and asteroid if they collide
 			# We don't need to test the torpedo radius because its so small (poor torpedo)
 			if distance < asteroid.radius
-				@torpedos.delete(torpedo)
-				@asteroids.delete(asteroid)
+				@objects.delete(torpedo)
+				@objects.delete(asteroid)
 				
 				# split larger asteroids into smaller ones upon collision with a torpedo
 				if asteroid.class == LargeAsteroid
-					@asteroids.push(MediumAsteroid.new(asteroid.xCenter, asteroid.yCenter, asteroid.xDelta, -asteroid.yDelta, self))
-					@asteroids.push(MediumAsteroid.new(asteroid.xCenter, asteroid.yCenter, -asteroid.xDelta, asteroid.yDelta, self))
+					@objects.push(MediumAsteroid.new(asteroid.xCenter, asteroid.yCenter, asteroid.xDelta, -asteroid.yDelta, self))
+					@objects.push(MediumAsteroid.new(asteroid.xCenter, asteroid.yCenter, -asteroid.xDelta, asteroid.yDelta, self))
 				elsif asteroid.class == MediumAsteroid
-					@asteroids.push(SmallAsteroid.new(asteroid.xCenter, asteroid.yCenter, asteroid.xDelta, -asteroid.yDelta, self))
-					@asteroids.push(SmallAsteroid.new(asteroid.xCenter, asteroid.yCenter, -asteroid.xDelta, asteroid.yDelta, self))
+					@objects.push(SmallAsteroid.new(asteroid.xCenter, asteroid.yCenter, asteroid.xDelta, -asteroid.yDelta, self))
+					@objects.push(SmallAsteroid.new(asteroid.xCenter, asteroid.yCenter, -asteroid.xDelta, asteroid.yDelta, self))
 				end
 				
 				@score += 100
-				break
 			end
 		end
 		
 		# player loses a life if they collided with an asteroid
 		distance = Math.sqrt((asteroid.xCenter - @ship.xCenter)**2 + (asteroid.yCenter - @ship.yCenter)**2)
 		if distance < asteroid.radius or distance < @ship.radius
-			@asteroids.delete(asteroid)
+			@objects.delete(asteroid)
+			@objects.delete(@ship)
+			
+			# Create a new ship
 			@ship = Ship.new(self)
 			@ship.destroyed = Time.now
-			@lives.slice!(-1) # Remove a life
+			@objects.push(@ship)
+			
+			# Remove a life
+			@objects.delete(@lives[-1])
+			@lives.slice!(-1) 
 		end
 	end
   end
@@ -363,7 +373,7 @@ class Game
 		  when ?h
 			@ship.accellerate
 		  when ?l
-			@torpedos.push(PTorpedo.new(@ship, self))
+			@objects.push(PTorpedo.new(@ship, self))
 		  when 27 # Escape
 			exit
 		end
@@ -422,19 +432,21 @@ class Game
 	
 	@score = 0
 	@lives = Array.new
+	@objects = Array.new # Satisfy C.3 that all graphical objects must be in an array
+
 	@lives[0] = GObject.new(self, 18, -18, 0, 0, 0, @ship_verticies, GL::LINE_LOOP)
 	@lives[1] = GObject.new(self, 16, -18, 0, 0, 0, @ship_verticies, GL::LINE_LOOP)
 	@lives[2] = GObject.new(self, 14, -18, 0, 0, 0, @ship_verticies, GL::LINE_LOOP)
+	@objects.push(@lives[0])
+	@objects.push(@lives[1])
+	@objects.push(@lives[2])
 	
-    @asteroids = Array.new
-
-    @ship = Ship.new(self)
-    @asteroids[0] = SmallAsteroid.new(2, 3, 0.05, 0.05, self)
-    @asteroids[1] = SmallAsteroid.new(3, 2, -0.05, -0.05, self)
-    @asteroids[2] = MediumAsteroid.new(3, -2, 0.05, -0.05, self)
-    @asteroids[3] = LargeAsteroid.new(-3, -2, 0.0, -0.05, self)
-
-	@torpedos = Array.new
+	@ship = Ship.new(self)
+    @objects.push(@ship)
+    @objects.push(SmallAsteroid.new(2, 3, 0.05, 0.05, self))
+    @objects.push(SmallAsteroid.new(3, 2, -0.05, -0.05, self))
+    @objects.push(MediumAsteroid.new(3, -2, 0.05, -0.05, self))
+    @objects.push(LargeAsteroid.new(-3, -2, 0.0, -0.05, self))
 	
     # the beginning of the graphics stuff
     # leave this alone
